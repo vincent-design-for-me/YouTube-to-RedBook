@@ -3,24 +3,27 @@ import type { TranscriptSnippet } from '@/lib/types/transcript';
 interface TranscriptListProps {
   snippets: TranscriptSnippet[];
   formatTime: (seconds: number) => string;
+  showTimestamps?: boolean;
 }
 
 /**
  * 字幕列表组件
  * 显示字幕片段列表，带时间戳和文本
  */
-export function TranscriptList({ snippets, formatTime }: TranscriptListProps) {
+export function TranscriptList({ snippets, formatTime, showTimestamps = true }: TranscriptListProps) {
   return (
-    <div className="space-y-3 max-h-[600px] overflow-y-auto">
+    <div className="flex flex-col gap-3 max-h-[600px] overflow-y-auto">
       {snippets.map((snippet, index) => (
         <div
           key={index}
-          className="border-l-4 border-blue-500 pl-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+          className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-accent"
         >
-          <div className="text-sm text-gray-500 dark:text-gray-400 mb-1 font-mono">
-            {formatTime(snippet.start)}
-          </div>
-          <div className="text-gray-900 dark:text-gray-100">{snippet.text}</div>
+          {showTimestamps && (
+            <div className="font-mono text-xs text-muted-foreground">
+              {formatTime(snippet.start)}
+            </div>
+          )}
+          <div className="text-sm leading-relaxed">{snippet.text}</div>
         </div>
       ))}
     </div>

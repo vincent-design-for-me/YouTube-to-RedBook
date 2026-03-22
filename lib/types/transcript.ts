@@ -16,6 +16,10 @@ export interface TranscriptSnippet {
 export interface TranscriptResponse {
   /** YouTube 视频 ID */
   video_id: string;
+  /** 视频标题 */
+  title: string;
+  /** 视频缩略图 URL */
+  thumbnail_url: string;
   /** 字幕片段列表 */
   snippets: TranscriptSnippet[];
 }

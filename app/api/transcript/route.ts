@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { YoutubeTranscript } from 'youtube-transcript';
 import { TranscriptError } from '@/lib/api/errors';
-import { extractVideoId } from '@/lib/utils/extract-video-id';
+import { fetchTranscript } from '@/lib/services/transcript-service';
 import type { TranscriptResponse, ErrorResponse } from '@/lib/types/transcript';
 
-/**
- * 处理字幕获取错误
- * @param error - 捕获的错误对象
- * @returns 格式化的错误响应
- */
 function handleTranscriptError(error: unknown): NextResponse<ErrorResponse> {
-  // 处理自定义错误
   if (error instanceof TranscriptError) {
     return NextResponse.json(
       { error: error.message },
@@ -18,7 +11,6 @@ function handleTranscriptError(error: unknown): NextResponse<ErrorResponse> {
     );
   }
 
-  // 处理 YouTube Transcript API 错误
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
 
@@ -51,7 +43,6 @@ function handleTranscriptError(error: unknown): NextResponse<ErrorResponse> {
     }
   }
 
-  // 未知错误
   console.error('Unexpected error in transcript API:', error);
   return NextResponse.json(
     { error: '获取字幕失败，请稍后重试' },
@@ -59,10 +50,6 @@ function handleTranscriptError(error: unknown): NextResponse<ErrorResponse> {
   );
 }
 
-/**
- * POST /api/transcript
- * 获取 YouTube 视频字幕
- */
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<TranscriptResponse | ErrorResponse>> {
@@ -78,20 +65,8 @@ export async function POST(
       );
     }
 
-    const videoId = extractVideoId(url);
-
-    const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-      lang,
-    });
-
-    return NextResponse.json({
-      video_id: videoId,
-      snippets: transcript.map((item) => ({
-        start: item.offset / 1000,
-        duration: item.duration / 1000,
-        text: item.text,
-      })),
-    });
+    const result = await fetchTranscript(url, lang);
+    return NextResponse.json(result);
   } catch (error) {
     return handleTranscriptError(error);
   }
