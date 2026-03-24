@@ -68,6 +68,9 @@ export default function Home() {
   const [isGeneratingArticle, setIsGeneratingArticle] = useState(false);
   const [articleProgress, setArticleProgress] = useState('');
 
+  // Session tracking
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
   // Scroll to results when transcript loads
   useEffect(() => {
     if (transcript && resultRef.current) {
@@ -86,6 +89,7 @@ export default function Home() {
     setImages([]);
     setImageErrors([]);
     setArticle(null);
+    setSessionId(null);
 
     try {
       const response = await fetch('/api/transcript', {
@@ -102,6 +106,7 @@ export default function Home() {
       }
 
       setTranscript(data as TranscriptResponse);
+      if ((data as any).sessionId) setSessionId((data as any).sessionId);
     } catch {
       setError('Network error. Please check your connection and try again.');
     } finally {
@@ -130,7 +135,7 @@ export default function Home() {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, lang: 'en' }),
+        body: JSON.stringify({ url, lang: 'en', sessionId }),
       });
 
       if (!response.ok) {
@@ -173,6 +178,7 @@ export default function Home() {
         body: JSON.stringify({
           keyPoints,
           transcriptText: transcript.snippets.map((s) => s.text).join(' '),
+          sessionId,
         }),
       });
 
@@ -219,6 +225,7 @@ export default function Home() {
         body: JSON.stringify({
           keyPoint,
           transcriptText: transcript.snippets.map((s) => s.text).join(' '),
+          sessionId,
         }),
       });
 
@@ -254,7 +261,7 @@ export default function Home() {
       const response = await fetch('/api/generate-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, lang: 'en' }),
+        body: JSON.stringify({ url, lang: 'en', sessionId }),
       });
 
       if (!response.ok) {
@@ -325,6 +332,9 @@ export default function Home() {
               {isLoggedIn ? (
                 <>
                   <span className="text-ed-on-surface-variant text-sm truncate max-w-[160px]">{user?.email}</span>
+                  <a href="/history" className="text-ed-on-surface-variant hover:text-ed-on-surface text-sm font-medium transition-colors">
+                    History
+                  </a>
                   <button
                     onClick={signOut}
                     className="text-ed-primary/70 hover:text-ed-primary text-sm font-medium transition-colors"
@@ -804,7 +814,27 @@ export default function Home() {
 
             {/* Article result */}
             {article && (
-              <WeChatArticlePreview article={article} />
+              <div className="space-y-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-ed-primary/60 font-sans tracking-[0.15em] uppercase text-[0.6875rem] font-semibold">
+                      WeChat
+                    </span>
+                    <h2 className="font-serif text-2xl text-ed-on-background mt-1">公众号文章预览</h2>
+                  </div>
+                  <button
+                    onClick={handleGenerateArticle}
+                    disabled={isGeneratingArticle}
+                    className="flex items-center gap-2 text-ed-primary/70 hover:text-ed-primary text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                    Regenerate
+                  </button>
+                </div>
+                <WeChatArticlePreview article={article} />
+              </div>
             )}
           </section>
         )}
