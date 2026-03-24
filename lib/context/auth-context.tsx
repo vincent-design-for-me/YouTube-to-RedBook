@@ -4,7 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
-type ModalView = 'signIn' | 'signUp' | null;
+type ModalView = 'signIn' | 'signUp' | 'forgotPassword' | null;
 
 interface AuthState {
   user: User | null;
@@ -12,10 +12,12 @@ interface AuthState {
   modalView: ModalView;
   openSignIn: () => void;
   openSignUp: () => void;
+  openForgotPassword: () => void;
   closeModals: () => void;
   signUp: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signOut: () => void;
+  resetPassword: (email: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -43,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const openSignIn = useCallback(() => setModalView('signIn'), []);
   const openSignUp = useCallback(() => setModalView('signUp'), []);
+  const openForgotPassword = useCallback(() => setModalView('forgotPassword'), []);
   const closeModals = useCallback(() => setModalView(null), []);
 
   const signUp = useCallback(async (email: string, password: string) => {
@@ -64,6 +67,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, [supabase.auth]);
 
+  const resetPassword = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/reset-password`,
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }, [supabase.auth]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -72,10 +83,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         modalView,
         openSignIn,
         openSignUp,
+        openForgotPassword,
         closeModals,
         signUp,
         signIn,
         signOut,
+        resetPassword,
       }}
     >
       {children}
