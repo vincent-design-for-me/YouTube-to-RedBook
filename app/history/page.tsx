@@ -233,15 +233,25 @@ export default function HistoryPage() {
                 {/* Latest Article */}
                 {detail.articles.length > 0 && (
                   <DetailSection title="WeChat Article">
-                    <div className="space-y-3">
+                    <div className="space-y-6">
                       {detail.articles[0].article?.title && (
-                        <h4 className="font-medium text-ed-on-background">{detail.articles[0].article.title}</h4>
+                        <h4 className="font-serif text-xl font-medium text-ed-on-background">{detail.articles[0].article.title}</h4>
                       )}
-                      {detail.articles[0].article?.content && (
-                        <div
-                          className="text-sm text-ed-on-surface leading-relaxed prose prose-sm max-w-none"
-                          dangerouslySetInnerHTML={{ __html: detail.articles[0].article.content }}
-                        />
+                      {detail.articles[0].article?.subtitle && (
+                        <p className="text-ed-on-surface-variant text-sm italic">{detail.articles[0].article.subtitle}</p>
+                      )}
+                      {detail.articles[0].article?.sections?.map((section: any, i: number) => (
+                        <div key={i} className="space-y-2">
+                          <h5 className="font-medium text-ed-on-background">{section.heading}</h5>
+                          {section.paragraphs?.map((p: string, j: number) => (
+                            <p key={j} className="text-sm text-ed-on-surface leading-relaxed">{p}</p>
+                          ))}
+                        </div>
+                      ))}
+                      {detail.articles[0].article?.conclusion && (
+                        <div className="border-t border-ed-outline-variant/10 pt-4">
+                          <p className="text-sm text-ed-on-surface leading-relaxed">{detail.articles[0].article.conclusion}</p>
+                        </div>
                       )}
                     </div>
                   </DetailSection>
