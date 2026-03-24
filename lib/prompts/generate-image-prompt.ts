@@ -26,7 +26,7 @@ LANGUAGE
 All visible text must be in Simplified Chinese.
 
 POSTER PURPOSE
-Create a highly structured "tech insight summary poster" that explains the key idea in a clear and visually organized way.
+Create a highly structured "Key insight poster" that explains the key idea in a clear and visually organized way.
 
 INFORMATION STRUCTURE
 

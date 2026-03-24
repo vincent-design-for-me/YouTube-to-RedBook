@@ -124,9 +124,11 @@ interface ImageViewProps {
   images: GeneratedImage[];
   isGenerating: boolean;
   imageErrors: string[];
+  onRegenerateImage?: (keyPointId: number) => void;
+  regeneratingImageIds?: Set<number>;
 }
 
-export function ImageView({ keyPoints, images, isGenerating, imageErrors }: ImageViewProps) {
+export function ImageView({ keyPoints, images, isGenerating, imageErrors, onRegenerateImage, regeneratingImageIds = new Set() }: ImageViewProps) {
   const handleDownloadImage = (base64Data: string, keyPointId: number) => {
     const link = document.createElement('a');
     link.href = `data:image/png;base64,${base64Data}`;
@@ -160,10 +162,20 @@ export function ImageView({ keyPoints, images, isGenerating, imageErrors }: Imag
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         {keyPoints.map((kp) => {
           const image = images.find((img) => img.keyPointId === kp.id);
+          const isRegenerating = regeneratingImageIds.has(kp.id);
 
           return (
             <Card key={kp.id} className="overflow-hidden">
-              {image ? (
+              {isRegenerating ? (
+                <div className="flex aspect-[3/4] items-center justify-center bg-muted/50">
+                  <div className="flex flex-col items-center gap-3 px-4">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    <p className="text-center text-xs text-muted-foreground">
+                      重新生成中...
+                    </p>
+                  </div>
+                </div>
+              ) : image ? (
                 <img
                   src={`data:image/png;base64,${image.base64Data}`}
                   alt={kp.title}
@@ -185,19 +197,31 @@ export function ImageView({ keyPoints, images, isGenerating, imageErrors }: Imag
               )}
               <CardContent className="p-3">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">#{kp.id} {kp.title}</p>
                     <p className="text-xs text-muted-foreground line-clamp-1">{kp.summary}</p>
                   </div>
-                  {image && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDownloadImage(image.base64Data, image.keyPointId)}
-                    >
-                      下载
-                    </Button>
-                  )}
+                  <div className="flex shrink-0 gap-1">
+                    {onRegenerateImage && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={isRegenerating || isGenerating}
+                        onClick={() => onRegenerateImage(kp.id)}
+                      >
+                        {isRegenerating ? '生成中...' : '重新生成'}
+                      </Button>
+                    )}
+                    {image && !isRegenerating && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDownloadImage(image.base64Data, image.keyPointId)}
+                      >
+                        下载
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>

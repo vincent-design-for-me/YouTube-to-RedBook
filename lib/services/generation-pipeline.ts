@@ -145,17 +145,25 @@ export async function runImagePipeline(
   });
 
   let completedCount = 0;
+  const images: GeneratedImage[] = [];
+
   const imagePromises = keyPoints.map(async (kp) => {
     const prompt = buildImagePrompt(kp, transcriptText);
     try {
       const base64Data = await generateImage(prompt);
+      const image: GeneratedImage = { keyPointId: kp.id, prompt, base64Data };
+      images.push(image);
       completedCount++;
+
+      // 每张图生成后立即推送给前端
       onProgress({
-        stage: 'generating_images',
+        stage: 'image_ready',
         progress: Math.round((completedCount / keyPoints.length) * 95),
         message: `正在生成配图 [${completedCount}/${keyPoints.length}]...`,
+        image,
       });
-      return { keyPointId: kp.id, prompt, base64Data } as GeneratedImage;
+
+      return image;
     } catch (error) {
       completedCount++;
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -169,13 +177,7 @@ export async function runImagePipeline(
     }
   });
 
-  const imageResults = await Promise.allSettled(imagePromises);
-  const images: GeneratedImage[] = imageResults
-    .filter(
-      (r): r is PromiseFulfilledResult<GeneratedImage | null> =>
-        r.status === 'fulfilled' && r.value !== null
-    )
-    .map((r) => r.value!);
+  await Promise.allSettled(imagePromises);
 
   onProgress({
     stage: 'complete',

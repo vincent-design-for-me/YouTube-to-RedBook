@@ -38,6 +38,7 @@ export type PipelineStage =
   | 'generating_copy'
   | 'generating_article'
   | 'generating_images'
+  | 'image_ready'
   | 'complete'
   | 'error';
 
@@ -46,6 +47,7 @@ export interface PipelineProgress {
   progress: number;
   message: string;
   data?: Partial<GenerationResult>;
+  image?: GeneratedImage;
 }
 
 export interface GenerationRecord {
