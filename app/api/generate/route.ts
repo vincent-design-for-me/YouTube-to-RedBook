@@ -1,12 +1,15 @@
 import { NextRequest } from 'next/server';
 import { fetchTranscript } from '@/lib/services/transcript-service';
 import { runCopyPipeline } from '@/lib/services/generation-pipeline';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getOrCreateSession, saveCopy } from '@/lib/services/history-service';
 import type { PipelineProgress } from '@/lib/types/generation';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const url = (body.url || '').trim();
   const lang = (body.lang || 'en').trim();
+  const sessionId = body.sessionId || null;
 
   if (!url) {
     return new Response(JSON.stringify({ error: '请输入 YouTube 链接' }), {
@@ -14,6 +17,10 @@ export async function POST(request: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  // Extract user before stream (cookies() only works in request scope)
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -38,6 +45,16 @@ export async function POST(request: NextRequest) {
           message: '文案生成完成！请查看效果，满意后可生成配图。',
           data: result,
         });
+
+        // Best-effort save
+        if (user) {
+          try {
+            const sid = sessionId || await getOrCreateSession(user.id, url, result.videoId);
+            await saveCopy(sid, user.id, result.keyPoints, result.copy);
+          } catch (saveError) {
+            console.error('Failed to save copy to history:', saveError);
+          }
+        }
       } catch (error) {
         console.error('Copy generation error:', error);
         sendEvent({
