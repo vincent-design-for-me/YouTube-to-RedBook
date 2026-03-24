@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { TranscriptError } from '@/lib/api/errors';
 import { fetchTranscript } from '@/lib/services/transcript-service';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getOrCreateSession, saveTranscript } from '@/lib/services/history-service';
 import type { TranscriptResponse, ErrorResponse } from '@/lib/types/transcript';
 
 function handleTranscriptError(error: unknown): NextResponse<ErrorResponse> {
@@ -66,7 +68,21 @@ export async function POST(
     }
 
     const result = await fetchTranscript(url, lang);
-    return NextResponse.json(result);
+
+    // Best-effort save: create session + save transcript if user is logged in
+    let sessionId: string | null = null;
+    try {
+      const supabase = await createServerSupabaseClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        sessionId = await getOrCreateSession(user.id, url, result.video_id, result.title);
+        await saveTranscript(sessionId, user.id, lang, result);
+      }
+    } catch (saveError) {
+      console.error('Failed to save transcript to history:', saveError);
+    }
+
+    return NextResponse.json({ ...result, sessionId });
   } catch (error) {
     return handleTranscriptError(error);
   }
