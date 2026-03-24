@@ -1,12 +1,15 @@
 import { NextRequest } from 'next/server';
 import { fetchTranscript } from '@/lib/services/transcript-service';
 import { runArticlePipeline } from '@/lib/services/generation-pipeline';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getOrCreateSession, saveArticle } from '@/lib/services/history-service';
 import type { PipelineProgress } from '@/lib/types/generation';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const url = (body.url || '').trim();
   const lang = (body.lang || 'en').trim();
+  const sessionId = body.sessionId || null;
 
   if (!url) {
     return new Response(JSON.stringify({ error: '请输入 YouTube 链接' }), {
@@ -14,6 +17,9 @@ export async function POST(request: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -38,6 +44,15 @@ export async function POST(request: NextRequest) {
           message: '公众号文章生成完成！',
           data: result,
         });
+
+        if (user) {
+          try {
+            const sid = sessionId || await getOrCreateSession(user.id, url, result.videoId);
+            await saveArticle(sid, user.id, result.keyPoints, result.article);
+          } catch (saveError) {
+            console.error('Failed to save article to history:', saveError);
+          }
+        }
       } catch (error) {
         console.error('Article generation error:', error);
         sendEvent({
