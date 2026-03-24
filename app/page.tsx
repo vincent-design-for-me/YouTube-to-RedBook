@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -47,7 +47,9 @@ export default function Home() {
   const [error, setError] = useState('');
   const [transcript, setTranscript] = useState<TranscriptResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const [transcriptExpanded, setTranscriptExpanded] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
+  const transcriptTopRef = useRef<HTMLDivElement>(null);
 
   // Xiaohongshu generation state
   const [keyPoints, setKeyPoints] = useState<KeyPoint[] | null>(null);
@@ -59,6 +61,7 @@ export default function Home() {
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [imageErrors, setImageErrors] = useState<string[]>([]);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+  const [regeneratingImageIds, setRegeneratingImageIds] = useState<Set<number>>(new Set());
 
   // Article generation state
   const [article, setArticle] = useState<WeChatArticle | null>(null);
@@ -77,6 +80,7 @@ export default function Home() {
     setLoading(true);
     setError('');
     setTranscript(null);
+    setTranscriptExpanded(false);
     setKeyPoints(null);
     setCopy(null);
     setImages([]);
@@ -186,9 +190,9 @@ export default function Home() {
           errors.push(progress.message);
         }
 
-        if (progress.stage === 'complete' && progress.data) {
-          const d = progress.data as { images?: GeneratedImage[] };
-          if (d.images) setImages(d.images);
+        if (progress.stage === 'image_ready' && progress.image) {
+          setImages((prev) => [...prev, progress.image as GeneratedImage]);
+        } else if (progress.stage === 'complete') {
           setImageErrors(errors);
         } else if (progress.stage === 'error') {
           setError(progress.message);
@@ -198,6 +202,45 @@ export default function Home() {
       setError('Image generation failed. Please try again.');
     } finally {
       setIsGeneratingImages(false);
+    }
+  };
+
+  const handleRegenerateImage = async (keyPointId: number) => {
+    if (!keyPoints || !transcript) return;
+    const keyPoint = keyPoints.find((kp) => kp.id === keyPointId);
+    if (!keyPoint) return;
+
+    setRegeneratingImageIds((prev) => new Set(prev).add(keyPointId));
+
+    try {
+      const response = await fetch('/api/regenerate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyPoint,
+          transcriptText: transcript.snippets.map((s) => s.text).join(' '),
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error || `图片 #${keyPointId} 重新生成失败`);
+        return;
+      }
+
+      const newImage: GeneratedImage = await response.json();
+      setImages((prev) => {
+        const filtered = prev.filter((img) => img.keyPointId !== keyPointId);
+        return [...filtered, newImage];
+      });
+    } catch {
+      setError(`图片 #${keyPointId} 重新生成失败，请重试`);
+    } finally {
+      setRegeneratingImageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(keyPointId);
+        return next;
+      });
     }
   };
 
@@ -246,12 +289,29 @@ export default function Home() {
         .join('\n')
     : '';
 
-  // Logged-out users see first 30 lines; logged-in see all
+  // Logged-out users see first 30 lines; logged-in see 30 by default, expandable
   const PREVIEW_LINES = 30;
   const allLines = transcriptMarkdown.split('\n');
   const isLoggedIn = !!user;
-  const visibleLines = isLoggedIn ? allLines : allLines.slice(0, PREVIEW_LINES);
-  const showPaywall = !isLoggedIn && allLines.length > PREVIEW_LINES;
+  const canExpand = allLines.length > PREVIEW_LINES;
+  const showPaywall = !isLoggedIn && canExpand;
+  const visibleLines = (!isLoggedIn || !transcriptExpanded) && canExpand
+    ? allLines.slice(0, PREVIEW_LINES)
+    : allLines;
+  const showExpandButton = isLoggedIn && canExpand && !transcriptExpanded;
+  const showCollapseControls = isLoggedIn && canExpand && transcriptExpanded;
+
+  const scrollToTranscriptTop = useCallback(() => {
+    transcriptTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const collapseTranscript = useCallback(() => {
+    setTranscriptExpanded(false);
+    // Scroll back to top after collapsing
+    setTimeout(() => {
+      transcriptTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }, []);
 
   return (
     <div className="min-h-screen bg-ed-surface text-ed-on-surface selection:bg-ed-primary-container selection:text-ed-on-primary-container">
@@ -264,7 +324,7 @@ export default function Home() {
             <div className="flex items-center gap-3">
               {isLoggedIn ? (
                 <>
-                  <span className="text-ed-on-surface-variant text-sm truncate max-w-[160px]">{user}</span>
+                  <span className="text-ed-on-surface-variant text-sm truncate max-w-[160px]">{user?.email}</span>
                   <button
                     onClick={signOut}
                     className="text-ed-primary/70 hover:text-ed-primary text-sm font-medium transition-colors"
@@ -433,7 +493,7 @@ export default function Home() {
             <div className="border-t border-ed-outline-variant/15" />
 
             {/* 3. Transcript Content */}
-            <div>
+            <div ref={transcriptTopRef}>
               <div className="flex items-center gap-2 mb-6">
                 <svg className="w-4 h-4 text-ed-primary/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
@@ -460,8 +520,42 @@ export default function Home() {
                   })}
                 </pre>
 
-                {showPaywall && (
-                  <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-ed-surface-container-lowest to-transparent rounded-b-2xl pointer-events-none" />
+                {(showPaywall || showExpandButton) && (
+                  <div className="absolute bottom-0 left-0 right-0 h-[480px] max-h-[80%] bg-gradient-to-t from-ed-surface-container-lowest via-ed-surface-container-lowest/60 to-transparent rounded-b-2xl pointer-events-none" />
+                )}
+
+                {showExpandButton && (
+                  <div className="absolute bottom-6 left-0 right-0 flex justify-center z-10">
+                    <button
+                      onClick={() => setTranscriptExpanded(true)}
+                      className="text-ed-on-surface-variant hover:text-ed-on-surface border border-ed-outline-variant/30 hover:border-ed-outline-variant/50 bg-ed-surface-container-lowest hover:bg-ed-surface-container-low px-5 py-2 rounded-xl text-sm font-medium transition-all duration-200 shadow-sm"
+                    >
+                      Expand More
+                    </button>
+                  </div>
+                )}
+
+                {showCollapseControls && (
+                  <div className="flex justify-center gap-3 pt-6">
+                    <button
+                      onClick={scrollToTranscriptTop}
+                      className="text-ed-on-surface-variant hover:text-ed-on-surface border border-ed-outline-variant/20 hover:border-ed-outline-variant/40 px-5 py-2 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-ed-surface-container-low inline-flex items-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                      </svg>
+                      Back to Top
+                    </button>
+                    <button
+                      onClick={collapseTranscript}
+                      className="text-ed-on-surface-variant hover:text-ed-on-surface border border-ed-outline-variant/20 hover:border-ed-outline-variant/40 px-5 py-2 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-ed-surface-container-low inline-flex items-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 15.75l-7.5-7.5-7.5 7.5" />
+                      </svg>
+                      Collapse
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -672,6 +766,8 @@ export default function Home() {
                       images={images}
                       isGenerating={isGeneratingImages}
                       imageErrors={imageErrors}
+                      onRegenerateImage={handleRegenerateImage}
+                      regeneratingImageIds={regeneratingImageIds}
                     />
                   </div>
                 )}
