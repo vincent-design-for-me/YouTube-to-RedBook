@@ -1,5 +1,6 @@
 import { generateText } from '@/lib/llm/text-provider';
 import { generateImage } from '@/lib/llm/image-provider';
+import { IMAGE_DEFAULTS } from '@/lib/config/image';
 import { buildKeypointExtractionPrompt } from '@/lib/prompts/extract-keypoints';
 import { buildCopyGenerationPrompt } from '@/lib/prompts/generate-copy';
 import { buildWeChatArticlePrompt } from '@/lib/prompts/generate-wechat-article';
@@ -130,13 +131,21 @@ export async function runArticlePipeline(
   return result;
 }
 
+export interface ImagePipelineOptions {
+  /** Extracted style prompt from reference image */
+  stylePrompt?: string;
+  /** Reference image base64 for Gemini SDK direct input */
+  referenceImageBase64?: string;
+}
+
 /**
  * Phase 2: Generate images for key points
  */
 export async function runImagePipeline(
   keyPoints: KeyPoint[],
   transcriptText: string,
-  onProgress: (progress: PipelineProgress) => void
+  onProgress: (progress: PipelineProgress) => void,
+  styleOptions?: ImagePipelineOptions
 ): Promise<GeneratedImage[]> {
   onProgress({
     stage: 'generating_images',
@@ -148,9 +157,9 @@ export async function runImagePipeline(
   const images: GeneratedImage[] = [];
 
   const imagePromises = keyPoints.map(async (kp) => {
-    const prompt = buildImagePrompt(kp, transcriptText);
+    const prompt = buildImagePrompt(kp, transcriptText, styleOptions?.stylePrompt);
     try {
-      const base64Data = await generateImage(prompt);
+      const base64Data = await generateImage(prompt, IMAGE_DEFAULTS, styleOptions?.referenceImageBase64);
       const image: GeneratedImage = { keyPointId: kp.id, prompt, base64Data };
       images.push(image);
       completedCount++;

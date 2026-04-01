@@ -8,37 +8,9 @@ import { WeChatArticlePreview } from '@/components/ui/wechat-article-preview';
 import { useAuth } from '@/lib/context/auth-context';
 import { formatTime } from '@/lib/utils/format-time';
 import type { TranscriptResponse, ErrorResponse } from '@/lib/types/transcript';
-import type { WeChatArticle, KeyPoint, XiaohongshuCopy, GeneratedImage, PipelineProgress } from '@/lib/types/generation';
+import type { WeChatArticle, KeyPoint, XiaohongshuCopy, GeneratedImage } from '@/lib/types/generation';
 import { CopyView, ImageView } from '@/components/ui/xiaohongshu-preview';
-
-async function readSSEStream(
-  response: Response,
-  onEvent: (progress: PipelineProgress) => void
-) {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No reader available');
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      try {
-        onEvent(JSON.parse(line.slice(6)));
-      } catch {
-        // skip malformed SSE
-      }
-    }
-  }
-}
+import { readSSEStream } from '@/lib/utils/sse';
 
 export default function Home() {
   const { user, isLoading: authLoading, openSignIn, openSignUp, signOut } = useAuth();
@@ -63,6 +35,14 @@ export default function Home() {
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [regeneratingImageIds, setRegeneratingImageIds] = useState<Set<number>>(new Set());
 
+  // Reference image for style
+  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [referenceImagePreview, setReferenceImagePreview] = useState<string | null>(null);
+  const referenceInputRef = useRef<HTMLInputElement>(null);
+  const [stylePrompt, setStylePrompt] = useState<string | null>(null);
+  const [isExtractingStyle, setIsExtractingStyle] = useState(false);
+  const [styleConfirmed, setStyleConfirmed] = useState(false);
+
   // Article generation state
   const [article, setArticle] = useState<WeChatArticle | null>(null);
   const [isGeneratingArticle, setIsGeneratingArticle] = useState(false);
@@ -70,6 +50,55 @@ export default function Home() {
 
   // Session tracking
   const [sessionId, setSessionId] = useState<string | null>(null);
+
+  const handleReferenceImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setReferenceImagePreview(dataUrl);
+      // Strip data URI prefix to get raw base64
+      setReferenceImage(dataUrl.replace(/^data:image\/\w+;base64,/, ''));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearReferenceImage = () => {
+    setReferenceImage(null);
+    setReferenceImagePreview(null);
+    setStylePrompt(null);
+    setStyleConfirmed(false);
+    if (referenceInputRef.current) referenceInputRef.current.value = '';
+  };
+
+  const handleExtractStyle = async () => {
+    if (!referenceImage) return;
+    setIsExtractingStyle(true);
+    setStylePrompt(null);
+    setStyleConfirmed(false);
+    setError('');
+
+    try {
+      const response = await fetch('/api/extract-style', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenceImage }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || 'Style extraction failed');
+        return;
+      }
+
+      setStylePrompt(data.stylePrompt);
+    } catch {
+      setError('风格提取失败，请重试');
+    } finally {
+      setIsExtractingStyle(false);
+    }
+  };
 
   // Scroll to results when transcript loads
   useEffect(() => {
@@ -179,6 +208,8 @@ export default function Home() {
           keyPoints,
           transcriptText: transcript.snippets.map((s) => s.text).join(' '),
           sessionId,
+          stylePrompt: styleConfirmed ? stylePrompt : undefined,
+          referenceImage: styleConfirmed ? referenceImage : undefined,
         }),
       });
 
@@ -226,6 +257,8 @@ export default function Home() {
           keyPoint,
           transcriptText: transcript.snippets.map((s) => s.text).join(' '),
           sessionId,
+          stylePrompt: styleConfirmed ? stylePrompt : undefined,
+          referenceImage: styleConfirmed ? referenceImage : undefined,
         }),
       });
 
@@ -744,9 +777,121 @@ export default function Home() {
                 </div>
 
                 {images.length === 0 && !isGeneratingImages && (
-                  <p className="text-ed-on-surface-variant/70 text-sm leading-relaxed">
-                    Copy is ready. {keyPoints.length} images will be generated based on {keyPoints.length} key points. Click the button above when you&apos;re happy with the copy.
-                  </p>
+                  <div className="space-y-4">
+                    <p className="text-ed-on-surface-variant/70 text-sm leading-relaxed">
+                      Copy is ready. Click &quot;Generate Images&quot; when you&apos;re happy with the copy. Optionally upload a reference image to control the visual style.
+                    </p>
+
+                    {/* Step 1: Reference image upload */}
+                    <div className="rounded-xl border border-dashed border-ed-outline-variant/30 p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4 text-ed-primary/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
+                        </svg>
+                        <span className="text-sm font-medium text-ed-on-surface-variant">Style Reference (Optional)</span>
+                      </div>
+
+                      {referenceImagePreview ? (
+                        <div className="flex items-start gap-3">
+                          <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-ed-outline-variant/20 flex-shrink-0">
+                            <Image src={referenceImagePreview} alt="Style reference" fill className="object-cover" />
+                          </div>
+                          <div className="flex flex-col gap-1.5 flex-1">
+                            <span className="text-xs text-ed-on-surface-variant/60">Reference uploaded</span>
+                            <div className="flex gap-2">
+                              {!stylePrompt && !isExtractingStyle && (
+                                <button
+                                  onClick={handleExtractStyle}
+                                  className="text-xs bg-ed-primary/10 text-ed-primary px-3 py-1.5 rounded-lg hover:bg-ed-primary/20 transition-colors font-medium"
+                                >
+                                  Extract Style
+                                </button>
+                              )}
+                              <button
+                                onClick={clearReferenceImage}
+                                className="text-xs text-red-400 hover:text-red-500 transition-colors"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => referenceInputRef.current?.click()}
+                          className="w-full py-2.5 rounded-lg border border-ed-outline-variant/20 text-ed-on-surface-variant/60 text-sm hover:border-ed-primary/30 hover:text-ed-primary/60 transition-all"
+                        >
+                          Click to upload reference image
+                        </button>
+                      )}
+                      <input
+                        ref={referenceInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleReferenceImageUpload}
+                        className="hidden"
+                      />
+
+                      {/* Step 2: Extracting style indicator */}
+                      {isExtractingStyle && (
+                        <div className="flex items-center gap-2 text-ed-on-surface-variant/70 text-sm py-2">
+                          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Analyzing style...
+                        </div>
+                      )}
+
+                      {/* Step 3: Show extracted style for confirmation */}
+                      {stylePrompt && !styleConfirmed && (
+                        <div className="space-y-2 pt-2 border-t border-ed-outline-variant/15">
+                          <label className="text-xs font-medium text-ed-on-surface-variant">
+                            Extracted Style Prompt (you can edit)
+                          </label>
+                          <textarea
+                            value={stylePrompt}
+                            onChange={(e) => setStylePrompt(e.target.value)}
+                            rows={5}
+                            className="w-full text-xs bg-ed-surface-container-lowest border border-ed-outline-variant/20 rounded-lg p-3 text-ed-on-background focus:ring-2 focus:ring-ed-primary/20 focus:border-ed-primary/30 resize-y font-mono leading-relaxed"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setStyleConfirmed(true)}
+                              className="text-xs bg-ed-primary text-ed-on-primary px-4 py-1.5 rounded-lg hover:opacity-90 transition-all font-medium"
+                            >
+                              Confirm Style
+                            </button>
+                            <button
+                              onClick={handleExtractStyle}
+                              className="text-xs text-ed-on-surface-variant/60 hover:text-ed-on-surface-variant px-3 py-1.5 rounded-lg border border-ed-outline-variant/20 hover:border-ed-outline-variant/40 transition-all"
+                            >
+                              Re-extract
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Step 4: Confirmed style badge */}
+                      {styleConfirmed && (
+                        <div className="flex items-center justify-between pt-2 border-t border-ed-outline-variant/15">
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            <span className="text-xs text-green-600 font-medium">Style confirmed</span>
+                          </div>
+                          <button
+                            onClick={() => setStyleConfirmed(false)}
+                            className="text-xs text-ed-on-surface-variant/50 hover:text-ed-on-surface-variant transition-colors"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 <CopyView

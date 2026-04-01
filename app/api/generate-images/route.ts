@@ -10,6 +10,9 @@ export async function POST(request: NextRequest) {
   const keyPoints: KeyPoint[] = body.keyPoints;
   const transcriptText: string = body.transcriptText || '';
   const sessionId = body.sessionId || null;
+  // Style comes pre-extracted and confirmed by the user
+  const stylePrompt: string | undefined = body.stylePrompt || undefined;
+  const referenceImageBase64: string | undefined = body.referenceImage || undefined;
 
   if (!keyPoints || keyPoints.length === 0) {
     return new Response(JSON.stringify({ error: '缺少知识点数据' }), {
@@ -45,7 +48,10 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        await runImagePipeline(keyPoints, transcriptText, wrappedSendEvent);
+        await runImagePipeline(keyPoints, transcriptText, wrappedSendEvent, {
+          stylePrompt,
+          referenceImageBase64,
+        });
         // 图片通过 image_ready 事件逐张推送，不再一次性打包发送
       } catch (error) {
         console.error('Image generation error:', error);

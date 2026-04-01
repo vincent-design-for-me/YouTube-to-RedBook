@@ -13,8 +13,8 @@ export function getEnvConfig() {
   const imageBaseUrl = process.env.IMAGE_BASE_URL || '';
   const imageApiKey = process.env.IMAGE_API_KEY || geminiApiKey;
   const imageModel = process.env.IMAGE_MODEL || 'gemini-3.1-flash-image-preview';
-  // 图片生成 API 格式: 'gemini-native' | 'openai-compat'
-  const imageApiFormat = (process.env.IMAGE_API_FORMAT || 'gemini-native') as 'gemini-native' | 'openai-compat';
+  // 图片生成 API 格式: 'gemini-native' | 'openai-compat' | 'wuai'
+  const imageApiFormat = (process.env.IMAGE_API_FORMAT || 'gemini-native') as 'gemini-native' | 'openai-compat' | 'wuai';
 
   return {
     geminiApiKey,

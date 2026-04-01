@@ -1,26 +1,29 @@
 import { GoogleGenAI } from '@google/genai';
 import { getEnvConfig } from '@/lib/config/env';
+import { IMAGE_DEFAULTS, type ImageOptions } from '@/lib/config/image';
 
-interface GenerateImageOptions {
-  aspectRatio?: string;
-}
-
+/**
+ * @param referenceImageBase64 - optional reference image for style guidance (Gemini SDK only)
+ */
 export async function generateImage(
   prompt: string,
-  options: GenerateImageOptions = {}
+  options: Partial<ImageOptions> = {},
+  referenceImageBase64?: string
 ): Promise<string> {
   const config = getEnvConfig();
+  const opts: ImageOptions = { ...IMAGE_DEFAULTS, ...options };
 
-  // 有独立的图片服务地址时，走第三方 API
   if (config.imageBaseUrl) {
-    if (config.imageApiFormat === 'openai-compat') {
-      return generateViaOpenAICompat(config, prompt, options);
+    if (config.imageApiFormat === 'wuai') {
+      return generateViaWuai(config, prompt, opts);
     }
-    return generateViaGeminiNativeProxy(config, prompt, options);
+    if (config.imageApiFormat === 'openai-compat') {
+      return generateViaOpenAICompat(config, prompt, opts);
+    }
+    return generateViaGeminiNativeProxy(config, prompt, opts);
   }
 
-  // 默认走 Google Gemini 原生 SDK
-  return generateViaGeminiSDK(config, prompt, options);
+  return generateViaGeminiSDK(config, prompt, opts, referenceImageBase64);
 }
 
 /**
@@ -29,17 +32,27 @@ export async function generateImage(
 async function generateViaGeminiSDK(
   config: ReturnType<typeof getEnvConfig>,
   prompt: string,
-  options: GenerateImageOptions
+  options: ImageOptions,
+  referenceImageBase64?: string
 ): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
+  // Build content parts: optional reference image + text prompt
+  const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+  if (referenceImageBase64) {
+    parts.push({ inlineData: { mimeType: 'image/png', data: referenceImageBase64 } });
+    parts.push({ text: `Use the above image as a visual style reference. Generate a new image following the same aesthetic.\n\n${prompt}` });
+  } else {
+    parts.push({ text: prompt });
+  }
+
   const response = await ai.models.generateContent({
     model: config.imageModel,
-    contents: prompt,
+    contents: [{ role: 'user', parts }],
     config: {
       responseModalities: ['TEXT', 'IMAGE'],
       imageConfig: {
-        aspectRatio: options.aspectRatio ?? '3:4',
+        aspectRatio: options.ratio,
       },
     },
   });
@@ -55,12 +68,11 @@ async function generateViaGeminiSDK(
 
 /**
  * Gemini 原生格式代理（第三方服务，如 newapi）
- * POST {baseUrl}/v1beta/models/{model}:generateContent
  */
 async function generateViaGeminiNativeProxy(
   config: ReturnType<typeof getEnvConfig>,
   prompt: string,
-  options: GenerateImageOptions
+  options: ImageOptions
 ): Promise<string> {
   const url = `${config.imageBaseUrl}/v1beta/models/${config.imageModel}:generateContent`;
 
@@ -71,17 +83,12 @@ async function generateViaGeminiNativeProxy(
       Authorization: `Bearer ${config.imageApiKey}`,
     },
     body: JSON.stringify({
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: prompt }],
-        },
-      ],
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
         responseModalities: ['TEXT', 'IMAGE'],
         imageConfig: {
-          aspectRatio: options.aspectRatio ?? '3:4',
-          imageSize: '4K',
+          aspectRatio: options.ratio,
+          imageSize: options.resolution.toUpperCase(), // '1k' → '1K'
         },
       },
     }),
@@ -104,12 +111,12 @@ async function generateViaGeminiNativeProxy(
 }
 
 /**
- * OpenAI 兼容格式（/openai/images/generations 或 /v1/images/generations）
+ * OpenAI 兼容格式（/v1/images/generations）
  */
 async function generateViaOpenAICompat(
   config: ReturnType<typeof getEnvConfig>,
   prompt: string,
-  options: GenerateImageOptions
+  options: ImageOptions
 ): Promise<string> {
   const url = `${config.imageBaseUrl}/v1/images/generations`;
 
@@ -121,11 +128,12 @@ async function generateViaOpenAICompat(
     },
     body: JSON.stringify({
       model: config.imageModel,
-      prompt: prompt,
+      prompt,
       response_format: 'b64_json',
       n: 1,
       extra_body: {
-        aspect_ratio: options.aspectRatio ?? '3:4',
+        aspect_ratio: options.ratio,
+        image_size: options.resolution.toUpperCase(),
       },
     }),
   });
@@ -142,4 +150,84 @@ async function generateViaOpenAICompat(
   }
 
   throw new Error('Image generation returned no image data');
+}
+
+/**
+ * wuaiapi 任务制接口
+ * POST /api/tasks/generate → 轮询 POST /api/tasks/{id}/poll → 下载图片转 base64
+ */
+async function generateViaWuai(
+  config: ReturnType<typeof getEnvConfig>,
+  prompt: string,
+  options: ImageOptions
+): Promise<string> {
+  const baseUrl = config.imageBaseUrl;
+  const token = config.imageApiKey;
+
+  if (!token) {
+    throw new Error('IMAGE_API_KEY is required for wuai API');
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+
+  // 1. 提交任务
+  const submitRes = await fetch(`${baseUrl}/api/tasks/generate`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      prompt,
+      ratio: options.ratio,
+      resolution: options.resolution, // '1k' | '2k' | '4k'
+    }),
+  });
+
+  const submitData = await submitRes.json();
+
+  if (submitData.code !== 200) {
+    throw new Error(`wuai submit failed: ${submitData.msg}`);
+  }
+
+  const taskId: number = submitData.data.id;
+
+  // 2. 轮询直到完成（最多 40 次，每次等 3 秒，共 2 分钟）
+  const MAX_POLLS = 40;
+  const POLL_INTERVAL_MS = 3000;
+
+  for (let i = 0; i < MAX_POLLS; i++) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
+    const pollRes = await fetch(`${baseUrl}/api/tasks/${taskId}/poll`, {
+      method: 'POST',
+      headers,
+    });
+
+    const pollData = await pollRes.json();
+
+    if (pollData.code !== 200) {
+      throw new Error(`wuai poll failed: ${pollData.msg}`);
+    }
+
+    const { status, result_images } = pollData.data;
+
+    if (status === 'SUCCEEDED' && result_images?.length > 0) {
+      // 3. 下载图片并转为 base64，保持下游不变
+      const imgRes = await fetch(result_images[0]);
+      if (!imgRes.ok) {
+        throw new Error(`Failed to download wuai image: ${imgRes.status}`);
+      }
+      const arrayBuffer = await imgRes.arrayBuffer();
+      return Buffer.from(arrayBuffer).toString('base64');
+    }
+
+    if (status === 'FAILED' || status === 'VIOLATION') {
+      throw new Error(`wuai task ${status}`);
+    }
+
+    // PENDING / PROCESSING → 继续轮询
+  }
+
+  throw new Error('wuai task timed out after 2 minutes');
 }

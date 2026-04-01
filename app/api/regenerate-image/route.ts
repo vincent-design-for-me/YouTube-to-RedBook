@@ -11,6 +11,9 @@ export async function POST(request: NextRequest) {
   const keyPoint: KeyPoint = body.keyPoint;
   const transcriptText: string = body.transcriptText || '';
   const sessionId = body.sessionId || null;
+  // Style comes pre-extracted and confirmed by the user
+  const stylePrompt: string | undefined = body.stylePrompt || undefined;
+  const referenceImageBase64: string | undefined = body.referenceImage || undefined;
 
   if (!keyPoint) {
     return new Response(JSON.stringify({ error: '缺少知识点数据' }), {
@@ -20,8 +23,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const prompt = buildImagePrompt(keyPoint, transcriptText);
-    const base64Data = await generateImage(prompt);
+    const prompt = buildImagePrompt(keyPoint, transcriptText, stylePrompt);
+    const base64Data = await generateImage(prompt, {}, referenceImageBase64);
 
     // Best-effort save to Supabase
     try {

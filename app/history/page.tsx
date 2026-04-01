@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/context/auth-context';
 import { Skeleton } from '@/components/ui/skeleton';
+import { HistoryImageView } from '@/components/ui/history-image-view';
 
 interface SessionSummary {
   id: string;
@@ -27,7 +28,7 @@ interface SessionDetail {
   transcript: { lang: string; content: any } | null;
   copies: Array<{ id: string; key_points: any[]; copy: any; created_at: string }>;
   articles: Array<{ id: string; key_points: any[]; article: any; created_at: string }>;
-  images: Array<{ id: string; key_point_id: number; url: string; created_at: string }>;
+  images: Array<{ id: string; key_point_id: number; url: string; prompt: string; created_at: string }>;
 }
 
 export default function HistoryPage() {
@@ -45,6 +46,7 @@ export default function HistoryPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailImages, setDetailImages] = useState<SessionDetail['images']>([]);
 
   // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -55,6 +57,10 @@ export default function HistoryPage() {
       router.push('/');
     }
   }, [authLoading, user, router]);
+
+  useEffect(() => {
+    if (detail) setDetailImages(detail.images);
+  }, [detail]);
 
   const fetchSessions = useCallback(async () => {
     setLoading(true);
@@ -258,22 +264,23 @@ export default function HistoryPage() {
                 )}
 
                 {/* Images */}
-                {detail.images.length > 0 && (
-                  <DetailSection title={`Images (${detail.images.length})`}>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {detail.images.map((img) => (
-                        <div key={img.id} className="relative aspect-[3/4] rounded-xl overflow-hidden bg-ed-surface-container">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={img.url}
-                            alt={`Key point ${img.key_point_id}`}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </DetailSection>
-                )}
+                {(() => {
+                  const historyKeyPoints = detail.copies[0]?.key_points || detail.articles[0]?.key_points || [];
+                  const historyTranscriptText = detail.transcript?.content?.snippets
+                    ? detail.transcript.content.snippets.map((s: any) => s.text).join(' ')
+                    : '';
+                  return (detailImages.length > 0 || historyKeyPoints.length > 0) && (
+                    <DetailSection title={`Images (${detailImages.length})`}>
+                      <HistoryImageView
+                        keyPoints={historyKeyPoints}
+                        images={detailImages}
+                        sessionId={detail.id}
+                        transcriptText={historyTranscriptText}
+                        onImagesChange={setDetailImages}
+                      />
+                    </DetailSection>
+                  );
+                })()}
               </div>
             )}
           </div>
