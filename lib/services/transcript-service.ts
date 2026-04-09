@@ -1,5 +1,6 @@
 import { YoutubeTranscript } from 'youtube-transcript';
 import { extractVideoId } from '@/lib/utils/extract-video-id';
+import { mergeTranscriptSegmentsIntoSentences } from '@/lib/utils/merge-transcript-sentences';
 import type { TranscriptResponse } from '@/lib/types/transcript';
 
 async function fetchVideoMeta(videoId: string): Promise<{ title: string; thumbnail_url: string }> {
@@ -32,14 +33,16 @@ export async function fetchTranscript(
     fetchVideoMeta(videoId),
   ]);
 
+  const raw = transcript.map((item) => ({
+    start: item.offset / 1000,
+    duration: item.duration / 1000,
+    text: item.text,
+  }));
+
   return {
     video_id: videoId,
     title: meta.title,
     thumbnail_url: meta.thumbnail_url,
-    snippets: transcript.map((item) => ({
-      start: item.offset / 1000,
-      duration: item.duration / 1000,
-      text: item.text,
-    })),
+    snippets: mergeTranscriptSegmentsIntoSentences(raw),
   };
 }
